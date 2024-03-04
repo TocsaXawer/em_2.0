@@ -1,4 +1,5 @@
 ﻿using System;
+using MimeKit;
 using System.Collections.Generic;
 using System.ComponentModel;
 using System.Data;
@@ -31,6 +32,114 @@ namespace em_2._0
         }
         private void textBox1_TextChanged(object sender, EventArgs e)
         {
+
+        }
+        static List<string> EML_to_outlook(string[] filepaths)
+        {
+            List<string> processedFiles = new List<string>();
+
+            string filePath = @"C:\em\.config.json";
+            string directory = "";
+
+            Outlook.Application outlookApp = new Outlook.Application();
+            Outlook.NameSpace outlookNamespace = outlookApp.GetNamespace("MAPI");
+            Outlook.Folder rootFolder = outlookNamespace.Session.DefaultStore.GetRootFolder() as Outlook.Folder;
+
+            if (File.Exists(filePath))
+            {  // Olvassa be a JSON tartalmat a fájlból
+                string jsonContent = File.ReadAllText(filePath);
+
+                // Deszerializálja a JSON-t egy objektummá
+                ConfigData configData = JsonConvert.DeserializeObject<ConfigData>(jsonContent);
+
+                // Most már használhatod a configData objektumot, amely tartalmazza a JSON-ből kiolvasott adatokat
+
+                directory = configData.output_folder;
+            }
+            else
+            {
+                MessageBox.Show("Ismeretlen Hiba");
+            }
+
+            // Az .eml fájl elérési útja
+            for (int i = 0; i < filepaths.Length; i++)
+            {
+                // MimeMessage objektum létrehozása az .eml fájl betöltésével
+                var mimeMessage = MimeMessage.Load(filepaths[i]);
+
+                // Címzett
+                var to = mimeMessage.To.ToString();
+
+                // Tárgy
+                var subject = mimeMessage.Subject;
+
+                // Szövegtartalom
+                var body = mimeMessage.TextBody;
+
+                // HTML tartalom
+                var htmlBody = mimeMessage.HtmlBody;
+
+                // Mellékletek
+                var attachments = mimeMessage.Attachments;
+
+
+                Outlook.Folder targetFolder;
+                try
+                {
+                    targetFolder = rootFolder.Folders[directory] as Outlook.Folder;
+                }
+                catch (System.Exception)
+                {
+                    targetFolder = rootFolder.Folders.Add(directory, Outlook.OlDefaultFolders.olFolderInbox) as Outlook.Folder;
+                }
+
+                // Új e-mail üzenet létrehozása
+                var mailItem = outlookApp.CreateItem(Outlook.OlItemType.olMailItem) as Outlook.MailItem;
+
+                // Állítsd be a levél címzettjét, tárgyát, szöveges és HTML tartalmát
+                mailItem.To = to;
+                mailItem.Subject = subject;
+                mailItem.Body = body;
+                mailItem.HTMLBody = htmlBody;
+
+                // Mellékletek hozzáadása
+                foreach (var attachment in attachments.OfType<MimePart>())
+                {
+                    // Melléklet hozzáadása a levélhez
+                    var fileName = attachment.FileName;
+                    using (var memoryStream = new MemoryStream())
+                    {
+                        if (attachment is TextPart textPart)
+                        {
+                            var text = textPart.Text;
+                            var bytes = Encoding.UTF8.GetBytes(text);
+                            memoryStream.Write(bytes, 0, bytes.Length);
+                        }
+                        else
+                        {
+                            attachment.Content.DecodeTo(memoryStream);
+                        }
+
+                        memoryStream.Position = 0;
+                        mailItem.Attachments.Add(memoryStream, Outlook.OlAttachmentType.olByValue, 1, fileName);
+                    }
+                }
+
+                
+
+
+                processedFiles.Add(filepaths[i]);
+
+                // Mentse a levelet piszkozatként
+                mailItem.Save();
+                mailItem.Move(targetFolder);
+            }
+
+            // (Választható) Állítsd be a piszkozat mappát
+            //var draftsFolder = outlookNamespace.GetDefaultFolder(Outlook.OlDefaultFolders.olFolderDrafts);
+            //mailItem.Move(draftsFolder);
+
+            return processedFiles;
 
         }
         static List<string> SaveToPST(string[] filepaths, string outputPath)
@@ -90,6 +199,8 @@ namespace em_2._0
             // Visszaadjuk a feldolgozott fájlneveket
             return processedFiles;
         }
+
+
         private void button1_Click(object sender, EventArgs e)
         {
             string filePath = @"C:\em\.config.json";
@@ -124,7 +235,6 @@ namespace em_2._0
                 ConfigData configData = JsonConvert.DeserializeObject<ConfigData>(jsonContent);
 
                 // Most már használhatod a configData objektumot, amely tartalmazza a JSON-ből kiolvasott adatokat
-
                 string directoryPath = configData.path;
                 string extension = configData.extension;
                 
@@ -132,7 +242,7 @@ namespace em_2._0
                 string[] filepaths = Directory.GetFiles(directoryPath, "*" + extension, SearchOption.AllDirectories);
 
                 // A feldolgozott fájlnevek megjelenítése az textBox1 szövegében
-                foreach (string processedFile in SaveToPST(filepaths, "C:\\Output.pst"))
+                foreach (string processedFile in EML_to_outlook(filepaths))
                 {
                     textBox1.AppendText(processedFile + Environment.NewLine);
                 }
